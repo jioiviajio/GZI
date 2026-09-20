@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "483866786235",
+    "project_id": "gzi-database",
+    "storage_bucket": "gzi-database.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:483866786235:android:39aaf1fd912306131d6c9e",
+        "android_client_info": {
+          "package_name": "com.example.gzi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBJuCrTezT7tUU_8lfjQz4HGAji6hYhBa8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
