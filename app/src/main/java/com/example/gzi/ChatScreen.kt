@@ -3,6 +3,7 @@ package com.example.gzi
 import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,7 +22,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -33,7 +36,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -41,10 +43,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,10 +62,18 @@ import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
+import java.text.SimpleDateFormat
+import java.util.Locale
 
-data class NoteItem(val id: String, val text: String, val userId: String, val authorName: String)
+data class NoteItem(
+    val id: String,
+    val text: String,
+    val userId: String,
+    val authorName: String,
+    val timestamp: com.google.firebase.Timestamp? = null,
+    val cardColorStr: String? = ""
+)
 
-// КОМПОНЕНТ ДИНАМИЧЕСКОЙ АВАТАРКИ
 @Composable
 fun UserAvatar(name: String, size: Int = 40) {
     val initials = name.split(" ")
@@ -84,24 +93,36 @@ fun UserAvatar(name: String, size: Int = 40) {
     }
 }
 
-// ЭКРАН ЧАТА
+fun formatTime(timestamp: com.google.firebase.Timestamp?): String {
+    if (timestamp == null) return ""
+    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+    return sdf.format(timestamp.toDate())
+}
+// ЗАМЕНИТЕ ВТОРУЮ ЧАСТЬ ФАЙЛА CHATSCREEN.KT ЭТИМ КОДОМ:
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ChatScreen(onOpenProfile: () -> Unit, onBackToMenu: () -> Unit) {
+fun ChatScreen(
+    progress: Float,
+    isExpanded: Boolean,
+    onBackToMenu: () -> Unit,
+    onScrollStateChanged: (Boolean) -> Unit
+) {
     val context = LocalContext.current
     val sharedPreferences = remember { context.getSharedPreferences("GZI_PREFS", Context.MODE_PRIVATE) }
 
-    var chatFontSize by remember { mutableStateOf(sharedPreferences.getFloat("chat_font_size", 16f)) }
-    var hideAvatars by remember { mutableStateOf(sharedPreferences.getBoolean("hide_avatars", false)) }
-    var compactCards by remember { mutableStateOf(sharedPreferences.getBoolean("compact_cards", false)) }
+    val chatFontSize = remember { mutableStateOf(sharedPreferences.getFloat("chat_font_size", 16f)) }
+    val hideAvatars = remember { mutableStateOf(sharedPreferences.getBoolean("hide_avatars", false)) }
+    val compactCards = remember { mutableStateOf(sharedPreferences.getBoolean("compact_cards", false)) }
+
+    val isDarkMode = sharedPreferences.getBoolean("is_dark_mode", false)
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                chatFontSize = sharedPreferences.getFloat("chat_font_size", 16f)
-                hideAvatars = sharedPreferences.getBoolean("hide_avatars", false)
-                compactCards = sharedPreferences.getBoolean("compact_cards", false)
+                chatFontSize.value = sharedPreferences.getFloat("chat_font_size", 16f)
+                hideAvatars.value = sharedPreferences.getBoolean("hide_avatars", false)
+                compactCards.value = sharedPreferences.getBoolean("compact_cards", false)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -113,215 +134,294 @@ fun ChatScreen(onOpenProfile: () -> Unit, onBackToMenu: () -> Unit) {
     val currentUserId = currentUser?.uid ?: "unknown"
     val currentDisplayName = currentUser?.displayName ?: "Сотрудник"
 
-    var textInput by remember { mutableStateOf("") }
-    var notesList by remember { mutableStateOf(listOf<NoteItem>()) }
+    val textInput = remember { mutableStateOf("") }
+    val notesList = remember { mutableStateOf(listOf<NoteItem>()) }
+    val selectedNoteForMyMenu = remember { mutableStateOf<NoteItem?>(null) }
+    val selectedNoteForOthersMenu = remember { mutableStateOf<NoteItem?>(null) }
+    val noteToEdit = remember { mutableStateOf<NoteItem?>(null) }
+    val editTextValue = remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
 
-    var selectedNoteForMyMenu by remember { mutableStateOf<NoteItem?>(null) }
-    var selectedNoteForOthersMenu by remember { mutableStateOf<NoteItem?>(null) }
-    var noteToEdit by remember { mutableStateOf<NoteItem?>(null) }
-    var editTextValue by remember { mutableStateOf("") }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { onScrollStateChanged(it) }
+    }
 
     LaunchedEffect(Unit) {
         db.collection("notes")
-            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .orderBy("createdAt", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshots, error ->
-                if (error != null) return@addSnapshotListener
-                if (snapshots != null) {
-                    notesList = snapshots.map { doc ->
+                if (error == null && snapshots != null) {
+                    notesList.value = snapshots.map { doc ->
                         NoteItem(
                             id = doc.id,
                             text = doc.getString("text") ?: "",
                             userId = doc.getString("userId") ?: "",
-                            authorName = doc.getString("authorName") ?: "Неизвестный"
+                            authorName = doc.getString("authorName") ?: "Неизвестный",
+                            timestamp = doc.getTimestamp("createdAt"),
+                            cardColorStr = doc.getString("cardColor") ?: ""
                         )
                     }
                 }
             }
     }
 
-    Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically
+    val containerShape = if (isExpanded) RoundedCornerShape(0.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+
+    Column(
+        modifier = Modifier.fillMaxSize().clip(containerShape).background(MaterialTheme.colorScheme.background).statusBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+    ) {
+        // ИСПРАВЛЕНО: Добавлен .clickable { onBackToMenu() } (так как триггер инвертирован, вызов вернет шторку в fullHeight)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { if (!isExpanded) onBackToMenu() } // Тач мгновенно разворачивает шторку
+                .padding(vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            FilledIconButton(
-                onClick = onBackToMenu,
-                modifier = Modifier.size(40.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box(
+                modifier = Modifier
+                    .size(width = 44.dp, height = 5.dp)
+                    .clip(RoundedCornerShape(2.5.dp))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            )
+            if (!isExpanded) {
+                Spacer(modifier = Modifier.height(6.dp))
+                // ИСПРАВЛЕНО: Текст сокращен, размер шрифта теперь равен общему системному chatFontSize
+                Text(
+                    text = "Потяните вверх или кликните",
+                    fontSize = chatFontSize.value.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        if (isExpanded) {
+            Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                FilledIconButton(onClick = onBackToMenu, modifier = Modifier.size(40.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
 
-        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), reverseLayout = true) {
-            items(notesList) { note ->
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.Bottom, reverseLayout = true) {
+            items(notesList.value.reversed()) { note ->
                 val isMyNote = note.userId == currentUserId
+
+                val finalCardColor = remember(note.cardColorStr, note.authorName, isDarkMode) {
+                    if (!note.cardColorStr.isNullOrBlank()) {
+                        try { Color(android.graphics.Color.parseColor(note.cardColorStr)) } catch (e: Exception) { null }
+                    } else if (isMyNote) {
+                        null
+                    } else {
+                        val hash = note.authorName.hashCode()
+                        if (isDarkMode) {
+                            val r = (hash and 0xFF) % 40 + 45
+                            val g = ((hash shr 8) and 0xFF) % 40 + 45
+                            val b = ((hash shr 16) and 0xFF) % 40 + 45
+                            Color(r, g, b)
+                        } else {
+                            val r = (hash and 0xFF) % 40 + 215
+                            val g = ((hash shr 8) and 0xFF) % 40 + 215
+                            val b = ((hash shr 16) and 0xFF) % 40 + 215
+                            Color(r, g, b)
+                        }
+                    }
+                }
+
+                val cardColor = finalCardColor ?: if (isMyNote) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                val textColor = if (!isMyNote && isDarkMode && note.cardColorStr.isNullOrBlank()) Color.White else MaterialTheme.colorScheme.onSurface
+
                 Card(
-                    modifier = Modifier.fillMaxWidth().combinedClickable(onClick = { }, onLongClick = {
-                        if (isMyNote) selectedNoteForMyMenu = note else selectedNoteForOthersMenu = note
-                    }),
-                    colors = CardDefaults.cardColors(containerColor = if (isMyNote) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        // ИСПРАВЛЕНО: Клик по карточке сообщения в мини-режиме тоже разворачивает чат
+                        .combinedClickable(
+                            onClick = { if (!isExpanded) onBackToMenu() },
+                            onLongClick = { if (isExpanded) { if (isMyNote) selectedNoteForMyMenu.value = note else selectedNoteForOthersMenu.value = note } }
+                        ),
+                    colors = CardDefaults.cardColors(containerColor = cardColor)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(if (compactCards) 6.dp else 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (!hideAvatars) {
-                            UserAvatar(name = note.authorName, size = if (compactCards) (chatFontSize * 1.5f).toInt() else (chatFontSize * 2f).toInt())
+                    Row(modifier = Modifier.fillMaxWidth().padding(if (compactCards.value) 6.dp else 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (!hideAvatars.value) {
+                            UserAvatar(name = note.authorName, size = if (compactCards.value) (chatFontSize.value * 1.5f).toInt() else (chatFontSize.value * 2f).toInt())
                             Spacer(modifier = Modifier.width(12.dp))
                         }
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = note.authorName,
-                                fontSize = (chatFontSize - 3).sp,
-                                color = if (isMyNote) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = note.authorName, fontSize = (chatFontSize.value - 3).sp, color = textColor, fontWeight = FontWeight.Bold)
+                                Text(text = formatTime(note.timestamp), fontSize = (chatFontSize.value - 4).sp, color = textColor.copy(alpha = 0.6f))
+                            }
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text(text = note.text, fontSize = chatFontSize.sp)
+                            Text(text = note.text, fontSize = chatFontSize.value.sp, color = textColor)
                         }
                     }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        // 3. БЛОК ВВОДА СООБЩЕНИЯ (Абсолютное выравнивание через BasicTextField)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .imePadding()
-                .navigationBarsPadding(),
-            verticalAlignment = Alignment.CenterVertically // Идеальное центрирование по оси
-        ) {
-            // Создаем кастомный контейнер для ввода с точно такой же высотой и скруглением, как у кнопки
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 56.dp) // Минимальная высота как у кнопки, но может расти вверх
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                contentAlignment = Alignment.CenterStart
+        if (isExpanded) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().imePadding().navigationBarsPadding(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (textInput.isEmpty()) {
-                    Text(
-                        text = "Введите сообщение...",
-                        fontSize = chatFontSize.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 56.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (textInput.value.isEmpty()) {
+                        Text(
+                            text = "Введите сообщение...",
+                            fontSize = chatFontSize.value.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    }
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = textInput.value,
+                        onValueChange = { textInput.value = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = chatFontSize.value.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     )
                 }
-                // Чистый ввод без скрытых системных отступов
-                androidx.compose.foundation.text.BasicTextField(
-                    value = textInput,
-                    onValueChange = { textInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = LocalTextStyle.current.copy(
-                        fontSize = chatFontSize.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                FilledIconButton(
+                    onClick = {
+                        if (textInput.value.isNotBlank()) {
+                            val note = hashMapOf(
+                                "text" to textInput.value.trim(),
+                                "userId" to currentUserId,
+                                "authorName" to currentDisplayName,
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                "cardColor" to ""
+                            )
+                            db.collection("notes").add(note)
+                            textInput.value = ""
+                        }
+                    },
+                    modifier = Modifier.size(56.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Отправить",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size((chatFontSize.value * 1.4f).dp.coerceAtMost(30.dp))
                     )
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Кнопка-квадрат с точно такими же геометрическими параметрами
-            FilledIconButton(
-                onClick = {
-                    if (textInput.isNotBlank()) {
-                        val note = hashMapOf(
-                            "text" to textInput,
-                            "userId" to currentUserId,
-                            "authorName" to currentDisplayName,
-                            "createdAt" to FieldValue.serverTimestamp()
-                        )
-                        db.collection("notes").add(note)
-                        textInput = ""
-                    }
-                },
-                modifier = Modifier.size(56.dp),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Отправить",
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size((chatFontSize * 1.4f).dp.coerceAtMost(30.dp))
-                )
+                }
             }
         }
     }
 
-    // ДИАЛОГ ДЛЯ СВОЕГО СООБЩЕНИЯ
-    if (selectedNoteForMyMenu != null) {
+    if (selectedNoteForMyMenu.value != null) {
         AlertDialog(
-            onDismissRequest = { selectedNoteForMyMenu = null },
-            title = { Text("Выберите действие", fontSize = chatFontSize.sp) },
-            text = { Text("Что вы хотите сделать с этим сообщением?", fontSize = chatFontSize.sp) },
+            onDismissRequest = { selectedNoteForMyMenu.value = null },
+            title = { Text("Управление элементом", fontSize = chatFontSize.value.sp) },
+            text = {
+                Column {
+                    Text("Выберите индивидуальный цвет карточки:", fontSize = (chatFontSize.value - 2).sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        val elementPalettes = listOf(
+                            "Дефолт" to "",
+                            "Красный" to "#FFCDD2",
+                            "Зелёный" to "#C8E6C9",
+                            "Синий" to "#BBDEFB",
+                            "Жёлтый" to "#FFF9C4",
+                            "Фиолет" to "#E1BEE7"
+                        )
+
+                        elementPalettes.forEach { (_, hexStr) ->
+                            val circleBg = if (hexStr.isEmpty()) Color.LightGray else Color(android.graphics.Color.parseColor(hexStr))
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(circleBg)
+                                    .clickable {
+                                        db.collection("notes").document(selectedNoteForMyMenu.value!!.id)
+                                            .update("cardColor", hexStr)
+                                        selectedNoteForMyMenu.value = null
+                                    }
+                            )
+                        }
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    noteToEdit = selectedNoteForMyMenu
-                    editTextValue = selectedNoteForMyMenu!!.text
-                    selectedNoteForMyMenu = null
-                }) { Text("Редактировать", fontSize = chatFontSize.sp) }
+                    noteToEdit.value = selectedNoteForMyMenu.value
+                    editTextValue.value = selectedNoteForMyMenu.value!!.text
+                    selectedNoteForMyMenu.value = null
+                }) { Text("Редактировать", fontSize = chatFontSize.value.sp) }
             },
             dismissButton = {
                 TextButton(
                     onClick = {
-                        db.collection("notes").document(selectedNoteForMyMenu!!.id).delete()
-                        selectedNoteForMyMenu = null
+                        db.collection("notes").document(selectedNoteForMyMenu.value!!.id).delete()
+                        selectedNoteForMyMenu.value = null
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text("Удалить", fontSize = chatFontSize.sp) }
+                ) { Text("Удалить", fontSize = chatFontSize.value.sp) }
             }
         )
     }
 
-    // ДИАЛОГ РЕДАКТИРОВАНИЯ ТЕКСТА
-    if (noteToEdit != null) {
+    if (noteToEdit.value != null) {
         AlertDialog(
-            onDismissRequest = { noteToEdit = null },
-            title = { Text("Редактирование", fontSize = chatFontSize.sp) },
+            onDismissRequest = { noteToEdit.value = null },
+            title = { Text("Редактирование", fontSize = chatFontSize.value.sp) },
             text = {
                 OutlinedTextField(
-                    value = editTextValue,
-                    onValueChange = { editTextValue = it },
+                    value = editTextValue.value,
+                    onValueChange = { editTextValue.value = it },
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = LocalTextStyle.current.copy(fontSize = chatFontSize.sp)
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = chatFontSize.value.sp)
                 )
             },
             confirmButton = {
                 Button(onClick = {
-                    if (editTextValue.isNotBlank()) {
-                        db.collection("notes").document(noteToEdit!!.id).update("text", editTextValue)
-                        noteToEdit = null
+                    if (editTextValue.value.isNotBlank()) {
+                        db.collection("notes").document(noteToEdit.value!!.id).update("text", editTextValue.value)
+                        noteToEdit.value = null
                     }
-                }) { Text("Сохранить", fontSize = chatFontSize.sp) }
+                }) { Text("Сохранить", fontSize = chatFontSize.value.sp) }
             },
-            dismissButton = { TextButton(onClick = { noteToEdit = null }) { Text("Отмена", fontSize = chatFontSize.sp) } }
+            dismissButton = { TextButton(onClick = { noteToEdit.value = null }) { Text("Отмена", fontSize = chatFontSize.value.sp) } }
         )
     }
 
-    // ДИАЛОГ ДЛЯ ЧУЖОГО СООБЩЕНИЯ
-    if (selectedNoteForOthersMenu != null) {
+    if (selectedNoteForOthersMenu.value != null) {
         AlertDialog(
-            onDismissRequest = { selectedNoteForOthersMenu = null },
-            title = { Text("Выберите действие", fontSize = chatFontSize.sp) },
-            text = { Text("Действия с сообщением пользователя ${selectedNoteForOthersMenu!!.authorName}:", fontSize = chatFontSize.sp) },
+            onDismissRequest = { selectedNoteForOthersMenu.value = null },
+            title = { Text("Выберите действие", fontSize = chatFontSize.value.sp) },
+            text = { Text("Действия с сообщением пользователя ${selectedNoteForOthersMenu.value!!.authorName}:", fontSize = chatFontSize.value.sp) },
             confirmButton = {
                 TextButton(onClick = {
-                    textInput = "@${selectedNoteForOthersMenu!!.authorName}, " + textInput
-                    selectedNoteForOthersMenu = null
-                }) { Text("Упомянуть", fontSize = chatFontSize.sp) }
+                    textInput.value = "@${selectedNoteForOthersMenu.value!!.authorName}, " + textInput.value
+                    selectedNoteForOthersMenu.value = null
+                }) { Text("Упомянуть", fontSize = chatFontSize.value.sp) }
             },
             dismissButton = {
                 TextButton(onClick = {
-                    textInput = "> ${selectedNoteForOthersMenu!!.authorName}: ${selectedNoteForOthersMenu!!.text}\n" + textInput
-                    selectedNoteForOthersMenu = null
-                }) { Text("Цитировать", fontSize = chatFontSize.sp) }
+                    textInput.value = "> ${selectedNoteForOthersMenu.value!!.authorName}: ${selectedNoteForOthersMenu.value!!.text}\n" + textInput.value
+                    selectedNoteForOthersMenu.value = null
+                }) { Text("Цитировать", fontSize = chatFontSize.value.sp) }
             }
         )
     }
