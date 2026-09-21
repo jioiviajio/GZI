@@ -58,7 +58,7 @@ fun AuthScreen() {
         OutlinedTextField(
             value = usernameInput,
             onValueChange = { usernameInput = it.trim() },
-            label = { Text("Логин (например, Krasnov_DA)") },
+            label = { Text("Логин (например, kuznetsov_dt)") },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(12.dp))
