@@ -89,7 +89,7 @@ fun UserAvatar(name: String, size: Int = 40) {
         modifier = Modifier.size(size.dp).clip(CircleShape).background(backgroundColor),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = initials, color = Color.White, fontSize = (size / 2.5).sp, fontWeight = FontWeight.Bold)
+        Text(text = initials, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -98,7 +98,6 @@ fun formatTime(timestamp: com.google.firebase.Timestamp?): String {
     val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
     return sdf.format(timestamp.toDate())
 }
-// ЗАМЕНИТЕ ВТОРУЮ ЧАСТЬ ФАЙЛА CHATSCREEN.KT ЭТИМ КОДОМ:
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
@@ -110,17 +109,15 @@ fun ChatScreen(
     val context = LocalContext.current
     val sharedPreferences = remember { context.getSharedPreferences("GZI_PREFS", Context.MODE_PRIVATE) }
 
-    val chatFontSize = remember { mutableStateOf(sharedPreferences.getFloat("chat_font_size", 16f)) }
+    // Локальные настройки отображения аватарок и компактности карточек
     val hideAvatars = remember { mutableStateOf(sharedPreferences.getBoolean("hide_avatars", false)) }
     val compactCards = remember { mutableStateOf(sharedPreferences.getBoolean("compact_cards", false)) }
-
     val isDarkMode = sharedPreferences.getBoolean("is_dark_mode", false)
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                chatFontSize.value = sharedPreferences.getFloat("chat_font_size", 16f)
                 hideAvatars.value = sharedPreferences.getBoolean("hide_avatars", false)
                 compactCards.value = sharedPreferences.getBoolean("compact_cards", false)
             }
@@ -168,13 +165,17 @@ fun ChatScreen(
     val containerShape = if (isExpanded) RoundedCornerShape(0.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
 
     Column(
-        modifier = Modifier.fillMaxSize().clip(containerShape).background(MaterialTheme.colorScheme.background).statusBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(containerShape)
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
     ) {
-        // ИСПРАВЛЕНО: Добавлен .clickable { onBackToMenu() } (так как триггер инвертирован, вызов вернет шторку в fullHeight)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { if (!isExpanded) onBackToMenu() } // Тач мгновенно разворачивает шторку
+                .clickable { if (!isExpanded) onBackToMenu() }
                 .padding(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -186,12 +187,11 @@ fun ChatScreen(
             )
             if (!isExpanded) {
                 Spacer(modifier = Modifier.height(6.dp))
-                // ИСПРАВЛЕНО: Текст сокращен, размер шрифта теперь равен общему системному chatFontSize
                 Text(
-                    text = "Потяните вверх или кликните",
-                    fontSize = chatFontSize.value.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    text = "Лента чата (Последние сообщения)",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
@@ -204,8 +204,21 @@ fun ChatScreen(
             }
         }
 
-        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.Bottom, reverseLayout = true) {
-            items(notesList.value.reversed()) { note ->
+        val displayNotes = remember(notesList.value, isExpanded) {
+            if (isExpanded) {
+                notesList.value.reversed()
+            } else {
+                notesList.value.takeLast(4).reversed()
+            }
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            verticalArrangement = Arrangement.Bottom,
+            reverseLayout = true
+        ) {
+            items(displayNotes) { note ->
                 val isMyNote = note.userId == currentUserId
 
                 val finalCardColor = remember(note.cardColorStr, note.authorName, isDarkMode) {
@@ -235,26 +248,25 @@ fun ChatScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                        // ИСПРАВЛЕНО: Клик по карточке сообщения в мини-режиме тоже разворачивает чат
+                        .padding(bottom = 6.dp)
                         .combinedClickable(
                             onClick = { if (!isExpanded) onBackToMenu() },
                             onLongClick = { if (isExpanded) { if (isMyNote) selectedNoteForMyMenu.value = note else selectedNoteForOthersMenu.value = note } }
                         ),
                     colors = CardDefaults.cardColors(containerColor = cardColor)
                 ) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(if (compactCards.value) 6.dp else 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(if (compactCards.value) 4.dp else 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!hideAvatars.value) {
-                            UserAvatar(name = note.authorName, size = if (compactCards.value) (chatFontSize.value * 1.5f).toInt() else (chatFontSize.value * 2f).toInt())
-                            Spacer(modifier = Modifier.width(12.dp))
+                            UserAvatar(name = note.authorName, size = if (compactCards.value) 24 else 32)
+                            Spacer(modifier = Modifier.width(10.dp))
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = note.authorName, fontSize = (chatFontSize.value - 3).sp, color = textColor, fontWeight = FontWeight.Bold)
-                                Text(text = formatTime(note.timestamp), fontSize = (chatFontSize.value - 4).sp, color = textColor.copy(alpha = 0.6f))
+                                Text(text = note.authorName, fontSize = 13.sp, color = textColor, fontWeight = FontWeight.Bold)
+                                Text(text = formatTime(note.timestamp), fontSize = 12.sp, color = textColor.copy(alpha = 0.6f))
                             }
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text(text = note.text, fontSize = chatFontSize.value.sp, color = textColor)
+                            Text(text = note.text, fontSize = 15.sp, color = textColor)
                         }
                     }
                 }
@@ -278,7 +290,7 @@ fun ChatScreen(
                     if (textInput.value.isEmpty()) {
                         Text(
                             text = "Введите сообщение...",
-                            fontSize = chatFontSize.value.sp,
+                            fontSize = 16.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
                     }
@@ -287,7 +299,7 @@ fun ChatScreen(
                         onValueChange = { textInput.value = it },
                         modifier = Modifier.fillMaxWidth(),
                         textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = chatFontSize.value.sp,
+                            fontSize = 16.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     )
@@ -298,15 +310,30 @@ fun ChatScreen(
                 FilledIconButton(
                     onClick = {
                         if (textInput.value.isNotBlank()) {
-                            val note = hashMapOf(
-                                "text" to textInput.value.trim(),
-                                "userId" to currentUserId,
-                                "authorName" to currentDisplayName,
-                                "createdAt" to FieldValue.serverTimestamp(),
-                                "cardColor" to ""
-                            )
-                            db.collection("notes").add(note)
-                            textInput.value = ""
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+                                .addOnSuccessListener { fcmToken ->
+                                    val note = hashMapOf(
+                                        "text" to textInput.value.trim(),
+                                        "userId" to currentUserId,
+                                        "authorName" to currentDisplayName,
+                                        "createdAt" to FieldValue.serverTimestamp(),
+                                        "cardColor" to "",
+                                        "senderToken" to fcmToken
+                                    )
+                                    db.collection("notes").add(note)
+                                    textInput.value = ""
+                                }
+                                .addOnFailureListener {
+                                    val note = hashMapOf(
+                                        "text" to textInput.value.trim(),
+                                        "userId" to currentUserId,
+                                        "authorName" to currentDisplayName,
+                                        "createdAt" to FieldValue.serverTimestamp(),
+                                        "cardColor" to ""
+                                    )
+                                    db.collection("notes").add(note)
+                                    textInput.value = ""
+                                }
                         }
                     },
                     modifier = Modifier.size(56.dp),
@@ -317,7 +344,7 @@ fun ChatScreen(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Отправить",
                         tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size((chatFontSize.value * 1.4f).dp.coerceAtMost(30.dp))
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -327,10 +354,10 @@ fun ChatScreen(
     if (selectedNoteForMyMenu.value != null) {
         AlertDialog(
             onDismissRequest = { selectedNoteForMyMenu.value = null },
-            title = { Text("Управление элементом", fontSize = chatFontSize.value.sp) },
+            title = { Text("Управление элементом", fontSize = 16.sp) },
             text = {
                 Column {
-                    Text("Выберите индивидуальный цвет карточки:", fontSize = (chatFontSize.value - 2).sp)
+                    Text("Выберите индивидуальный цвет карточки:", fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
@@ -368,7 +395,7 @@ fun ChatScreen(
                     noteToEdit.value = selectedNoteForMyMenu.value
                     editTextValue.value = selectedNoteForMyMenu.value!!.text
                     selectedNoteForMyMenu.value = null
-                }) { Text("Редактировать", fontSize = chatFontSize.value.sp) }
+                }) { Text("Редактировать", fontSize = 16.sp) }
             },
             dismissButton = {
                 TextButton(
@@ -377,7 +404,7 @@ fun ChatScreen(
                         selectedNoteForMyMenu.value = null
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text("Удалить", fontSize = chatFontSize.value.sp) }
+                ) { Text("Удалить", fontSize = 16.sp) }
             }
         )
     }
@@ -385,13 +412,13 @@ fun ChatScreen(
     if (noteToEdit.value != null) {
         AlertDialog(
             onDismissRequest = { noteToEdit.value = null },
-            title = { Text("Редактирование", fontSize = chatFontSize.value.sp) },
+            title = { Text("Редактирование", fontSize = 16.sp) },
             text = {
                 OutlinedTextField(
                     value = editTextValue.value,
                     onValueChange = { editTextValue.value = it },
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = chatFontSize.value.sp)
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp)
                 )
             },
             confirmButton = {
@@ -400,28 +427,28 @@ fun ChatScreen(
                         db.collection("notes").document(noteToEdit.value!!.id).update("text", editTextValue.value)
                         noteToEdit.value = null
                     }
-                }) { Text("Сохранить", fontSize = chatFontSize.value.sp) }
+                }) { Text("Сохранить", fontSize = 16.sp) }
             },
-            dismissButton = { TextButton(onClick = { noteToEdit.value = null }) { Text("Отмена", fontSize = chatFontSize.value.sp) } }
+            dismissButton = { TextButton(onClick = { noteToEdit.value = null }) { Text("Отмена", fontSize = 16.sp) } }
         )
     }
 
     if (selectedNoteForOthersMenu.value != null) {
         AlertDialog(
             onDismissRequest = { selectedNoteForOthersMenu.value = null },
-            title = { Text("Выберите действие", fontSize = chatFontSize.value.sp) },
-            text = { Text("Действия с сообщением пользователя ${selectedNoteForOthersMenu.value!!.authorName}:", fontSize = chatFontSize.value.sp) },
+            title = { Text("Выберите действие", fontSize = 16.sp) },
+            text = { Text("Действия с сообщением пользователя ${selectedNoteForOthersMenu.value!!.authorName}:", fontSize = 16.sp) },
             confirmButton = {
                 TextButton(onClick = {
                     textInput.value = "@${selectedNoteForOthersMenu.value!!.authorName}, " + textInput.value
                     selectedNoteForOthersMenu.value = null
-                }) { Text("Упомянуть", fontSize = chatFontSize.value.sp) }
+                }) { Text("Упомянуть", fontSize = 16.sp) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     textInput.value = "> ${selectedNoteForOthersMenu.value!!.authorName}: ${selectedNoteForOthersMenu.value!!.text}\n" + textInput.value
                     selectedNoteForOthersMenu.value = null
-                }) { Text("Цитировать", fontSize = chatFontSize.value.sp) }
+                }) { Text("Цитировать", fontSize = 16.sp) }
             }
         )
     }

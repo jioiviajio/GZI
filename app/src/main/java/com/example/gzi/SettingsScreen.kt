@@ -1,6 +1,8 @@
 package com.example.gzi
 
 import android.content.Context
+import android.os.Build
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -44,6 +47,8 @@ import androidx.compose.ui.unit.sp
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.auth.userProfileChangeRequest
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
 import kotlin.math.roundToInt
 
 @Composable
@@ -61,6 +66,48 @@ fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
     val compactCards = remember { mutableStateOf(sharedPreferences.getBoolean("compact_cards", false)) }
     val isDarkMode = remember { mutableStateOf(sharedPreferences.getBoolean("is_dark_mode", false)) }
 
+    // --- ИНТЕГРАЦИЯ СИСТЕМЫ ОБНОВЛЕНИЙ ---
+    val updateManager = remember { AppUpdateManager(context) }
+    val showUpdateDialog = remember { mutableStateOf(false) }
+    val isCheckingUpdate = remember { mutableStateOf(false) }
+    val latestVersionName = remember { mutableStateOf("") }
+    val apkDownloadUrl = remember { mutableStateOf("") }
+
+    val checkForUpdates = {
+        isCheckingUpdate.value = true
+        val remoteConfig = FirebaseRemoteConfig.getInstance()
+
+        val configSettings = FirebaseRemoteConfigSettings.Builder()
+            .setMinimumFetchIntervalInSeconds(60) // Кэш на 1 минуту для быстрой отладки изменений
+            .build()
+        remoteConfig.setConfigSettingsAsync(configSettings)
+
+        remoteConfig.fetchAndActivate().addOnCompleteListener { task ->
+            isCheckingUpdate.value = false
+            if (task.isSuccessful) {
+                val remoteVersionCode = remoteConfig.getLong("current_version_code")
+
+                val currentVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0)).longVersionCode
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionCode.toLong()
+                }
+
+                if (remoteVersionCode > currentVersionCode) {
+                    latestVersionName.value = remoteConfig.getString("latest_version_name")
+                    apkDownloadUrl.value = remoteConfig.getString("apk_url")
+                    showUpdateDialog.value = true
+                } else {
+                    Toast.makeText(context, "У вас установлена последняя версия", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(context, "Не удалось проверить обновления", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    // --- КОНЕЦ БЛОКА ОБНОВЛЕНИЙ ---
+
     val parseHexToRGB = { hex: String ->
         try {
             val colorInt = android.graphics.Color.parseColor(hex)
@@ -68,11 +115,8 @@ fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
         } catch(e: Exception) { Triple(21, 101, 192) }
     }
 
-    // Оставлен только RGB стейт кнопок интерфейса
     val btnColorRGB = remember { mutableStateOf(parseHexToRGB(sharedPreferences.getString("color_buttons", "#1565C0") ?: "#1565C0")) }
-
     val formatRGBtoHex = { r: Int, g: Int, b: Int -> String.format("#%02X%02X%02X", r, g, b) }
-
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.Top,
@@ -117,7 +161,6 @@ fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
                 Text("Кастомизация интерфейса", fontSize = (fontSizeValue.value + 1).sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.CenterHorizontally))
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Только один RGB-селектор для кнопок системы
                 Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                         Text("Цвет интерфейса и кнопок", fontWeight = FontWeight.Medium, fontSize = fontSizeValue.value.sp)
@@ -139,14 +182,14 @@ fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
 
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Скрыть аватарки в чате", fontSize = fontSizeValue.value.sp)
-                    Switch(checked = hideAvatars.value, onCheckedChange = { hideAvatars.value = it })
+                    Switch(checked = hideAvatars.value, onCheckedChange = { hideAvatars.value = it; sharedPreferences.edit().putBoolean("hide_avatars", it).apply() })
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Компактный вид карточек", fontSize = fontSizeValue.value.sp)
-                    Switch(checked = compactCards.value, onCheckedChange = { compactCards.value = it })
+                    Switch(checked = compactCards.value, onCheckedChange = { compactCards.value = it; sharedPreferences.edit().putBoolean("compact_cards", it).apply() })
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -163,7 +206,6 @@ fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
                 Divider()
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Изменен контейнер предпросмотра: теперь карточка системного цвета (primaryContainer)
                 Text("Пример сообщения:", fontSize = (fontSizeValue.value - 2).sp, color = MaterialTheme.colorScheme.outline)
                 Spacer(modifier = Modifier.height(6.dp))
                 Card(
@@ -180,6 +222,36 @@ fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(text = "Вот так будет выглядеть текст сообщений в чате.", fontSize = fontSizeValue.value.sp)
                         }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Обновление системы", fontSize = (fontSizeValue.value + 2).sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Рекомендуется регулярно проверять наличие обновлений для стабильной работы всех разделов приложения ПСГиИ.",
+                    fontSize = (fontSizeValue.value - 2).sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = { checkForUpdates() },
+                    enabled = !isCheckingUpdate.value,
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    if (isCheckingUpdate.value) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Проверить обновления", fontSize = fontSizeValue.value.sp)
                     }
                 }
             }
@@ -213,6 +285,35 @@ fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
                 text = { OutlinedTextField(value = newPassword.value, onValueChange = { newPassword.value = it }, visualTransformation = PasswordVisualTransformation()) },
                 confirmButton = { Button(onClick = { if (newPassword.value.length >= 6) { currentUser?.updatePassword(newPassword.value)?.addOnSuccessListener { showPasswordDialog.value = false } } }) { Text("Сохранить") } },
                 dismissButton = { TextButton(onClick = { showPasswordDialog.value = false }) { Text("Отмена") } }
+            )
+        }
+
+        if (showUpdateDialog.value) {
+            AlertDialog(
+                onDismissRequest = { showUpdateDialog.value = false },
+                title = { Text("Доступна новая версия!", fontSize = fontSizeValue.value.sp, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "Найдена новая версия приложения: ${latestVersionName.value}.\nХотите скачать и установить её прямо сейчас?",
+                        fontSize = (fontSizeValue.value - 1).sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showUpdateDialog.value = false
+                            updateManager.downloadAndInstallApk(
+                                url = apkDownloadUrl.value,
+                                fileName = "gzi_latest_${latestVersionName.value}.apk"
+                            )
+                        }
+                    ) { Text("Обновить", fontSize = fontSizeValue.value.sp) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showUpdateDialog.value = false }) {
+                        Text("Позже", fontSize = fontSizeValue.value.sp)
+                    }
+                }
             )
         }
     }

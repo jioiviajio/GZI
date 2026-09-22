@@ -1,58 +1,44 @@
 package com.example.gzi.ui.theme
 
-import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
-
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
-)
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 
 @Composable
 fun GZITheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    buttonColor: androidx.compose.ui.graphics.Color,
+    chatFontSize: Float, // ПРИНИМАЕМ ЗНАЧЕНИЕ ПОЛЗУНКА ИЗ НАСТРОЕК
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
+    val currentDensity = LocalDensity.current
 
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+    // Рассчитываем масштаб: берем базовый размер 16f за единицу (1.0f)
+    val customFontScale = chatFontSize / 16f
+
+    val fixedFontDensity = remember(currentDensity, customFontScale) {
+        Density(
+            density = currentDensity.density,
+            fontScale = customFontScale // БЛОКИРУЕМ СИСТЕМУ И СТАВИМ ТОЛЬКО НАШ МАСШТАБ
+        )
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    val colors = if (darkTheme) {
+        darkColorScheme(primary = buttonColor, primaryContainer = buttonColor.copy(alpha = 0.3f))
+    } else {
+        lightColorScheme(primary = buttonColor, primaryContainer = buttonColor.copy(alpha = 0.15f))
+    }
+
+    CompositionLocalProvider(LocalDensity provides fixedFontDensity) {
+        MaterialTheme(
+            colorScheme = colors,
+            content = content
+        )
+    }
 }

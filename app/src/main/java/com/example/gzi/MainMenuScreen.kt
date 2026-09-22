@@ -1,6 +1,9 @@
 package com.example.gzi
 
-import android.content.Context
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,39 +20,34 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 
 @Composable
 fun MainMenuScreen(progress: Float, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
-    val sharedPreferences = remember { context.getSharedPreferences("GZI_PREFS", Context.MODE_PRIVATE) }
-    var chatFontSize by remember { mutableStateOf(sharedPreferences.getFloat("chat_font_size", 16f)) }
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                chatFontSize = sharedPreferences.getFloat("chat_font_size", 16f)
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (!isGranted) {
+                Toast.makeText(context, "Внимание: без этого вы пропустите важные сообщения!", Toast.LENGTH_LONG).show()
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    )
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     val currentDisplayName = Firebase.auth.currentUser?.displayName ?: "Сотрудник"
@@ -68,17 +66,17 @@ fun MainMenuScreen(progress: Float, onOpenSettings: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                UserAvatar(name = currentDisplayName, size = if (chatFontSize > 20) 48 else 40)
+                UserAvatar(name = currentDisplayName, size = 40)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Приложение ПСГиИ", fontSize = (chatFontSize + 2).sp, fontWeight = FontWeight.Bold)
+                Text(text = "Приложение ПСГиИ", fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
             TextButton(onClick = onOpenSettings, enabled = contentAlpha > 0.5f) {
-                Text("Настройки", fontSize = chatFontSize.sp)
+                Text("Настройки", fontSize = 16.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        Text("Разделы системы:", fontSize = (chatFontSize - 2).sp, color = MaterialTheme.colorScheme.outline)
+        Text("Разделы системы:", fontSize = 14.sp, color = MaterialTheme.colorScheme.outline)
         Spacer(modifier = Modifier.height(12.dp))
 
         Button(
@@ -87,7 +85,7 @@ fun MainMenuScreen(progress: Float, onOpenSettings: () -> Unit) {
             modifier = Modifier.fillMaxWidth().height(56.dp),
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
         ) {
-            Text("Испытания", fontSize = chatFontSize.sp, fontWeight = FontWeight.Medium)
+            Text("Испытания", fontSize = 16.sp, fontWeight = FontWeight.Medium)
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -98,7 +96,7 @@ fun MainMenuScreen(progress: Float, onOpenSettings: () -> Unit) {
             modifier = Modifier.fillMaxWidth().height(56.dp),
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
         ) {
-            Text("Лаборатория", fontSize = chatFontSize.sp, fontWeight = FontWeight.Medium)
+            Text("Лаборатория", fontSize = 16.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
