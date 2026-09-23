@@ -98,6 +98,7 @@ fun formatTime(timestamp: com.google.firebase.Timestamp?): String {
     val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
     return sdf.format(timestamp.toDate())
 }
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
@@ -109,7 +110,6 @@ fun ChatScreen(
     val context = LocalContext.current
     val sharedPreferences = remember { context.getSharedPreferences("GZI_PREFS", Context.MODE_PRIVATE) }
 
-    // Локальные настройки отображения аватарок и компактности карточек
     val hideAvatars = remember { mutableStateOf(sharedPreferences.getBoolean("hide_avatars", false)) }
     val compactCards = remember { mutableStateOf(sharedPreferences.getBoolean("compact_cards", false)) }
     val isDarkMode = sharedPreferences.getBoolean("is_dark_mode", false)
@@ -175,7 +175,7 @@ fun ChatScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { if (!isExpanded) onBackToMenu() }
+                .clickable { onBackToMenu() }
                 .padding(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -188,7 +188,7 @@ fun ChatScreen(
             if (!isExpanded) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Лента чата (Последние сообщения)",
+                    text = "Лента чата сотрудников",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
@@ -204,12 +204,8 @@ fun ChatScreen(
             }
         }
 
-        val displayNotes = remember(notesList.value, isExpanded) {
-            if (isExpanded) {
-                notesList.value.reversed()
-            } else {
-                notesList.value.takeLast(4).reversed()
-            }
+        val displayNotes = remember(notesList.value) {
+            notesList.value.reversed()
         }
 
         LazyColumn(
@@ -355,41 +351,7 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { selectedNoteForMyMenu.value = null },
             title = { Text("Управление элементом", fontSize = 16.sp) },
-            text = {
-                Column {
-                    Text("Выберите индивидуальный цвет карточки:", fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        val elementPalettes = listOf(
-                            "Дефолт" to "",
-                            "Красный" to "#FFCDD2",
-                            "Зелёный" to "#C8E6C9",
-                            "Синий" to "#BBDEFB",
-                            "Жёлтый" to "#FFF9C4",
-                            "Фиолет" to "#E1BEE7"
-                        )
-
-                        elementPalettes.forEach { (_, hexStr) ->
-                            val circleBg = if (hexStr.isEmpty()) Color.LightGray else Color(android.graphics.Color.parseColor(hexStr))
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(circleBg)
-                                    .clickable {
-                                        db.collection("notes").document(selectedNoteForMyMenu.value!!.id)
-                                            .update("cardColor", hexStr)
-                                        selectedNoteForMyMenu.value = null
-                                    }
-                            )
-                        }
-                    }
-                }
-            },
+            text = { Text("Вы хотите отредактировать или удалить выбранное сообщение?", fontSize = 14.sp) },
             confirmButton = {
                 TextButton(onClick = {
                     noteToEdit.value = selectedNoteForMyMenu.value
