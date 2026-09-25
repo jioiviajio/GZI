@@ -32,7 +32,11 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 
 @Composable
-fun MainMenuScreen(progress: Float, onOpenSettings: () -> Unit) {
+fun MainMenuScreen(
+    progress: Float,
+    onOpenSettings: () -> Unit,
+    onOpenLaboratory: () -> Unit
+) {
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -78,23 +82,30 @@ fun MainMenuScreen(progress: Float, onOpenSettings: () -> Unit) {
         Spacer(modifier = Modifier.height(24.dp))
         Text("Разделы системы:", fontSize = 14.sp, color = MaterialTheme.colorScheme.outline)
         Spacer(modifier = Modifier.height(12.dp))
-
+        // ПУНКТ 1: Испытания
         Button(
-            onClick = { },
+            onClick = { /* Будущий переход к экрану Испытаний */ },
             enabled = contentAlpha > 0.5f,
             modifier = Modifier.fillMaxWidth().height(56.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            )
         ) {
             Text("Испытания", fontSize = 16.sp, fontWeight = FontWeight.Medium)
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        // ПУНКТ 2: Лаборатория
         Button(
-            onClick = { },
+            onClick = onOpenLaboratory,
             enabled = contentAlpha > 0.5f,
             modifier = Modifier.fillMaxWidth().height(56.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+            )
         ) {
             Text("Лаборатория", fontSize = 16.sp, fontWeight = FontWeight.Medium)
         }

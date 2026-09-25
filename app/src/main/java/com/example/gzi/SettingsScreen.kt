@@ -33,6 +33,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -52,7 +53,11 @@ import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
 import kotlin.math.roundToInt
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
+fun SettingsScreen(
+    autoCheckForUpdates: Boolean = false, // Флаг автоматического старта проверки обновлений из пуша
+    onBack: () -> Unit,
+    onSignOut: () -> Unit
+) {
     val context = LocalContext.current
     val sharedPreferences = remember { context.getSharedPreferences("GZI_PREFS", Context.MODE_PRIVATE) }
 
@@ -78,7 +83,7 @@ fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
         val remoteConfig = FirebaseRemoteConfig.getInstance()
 
         val configSettings = FirebaseRemoteConfigSettings.Builder()
-            .setMinimumFetchIntervalInSeconds(60) // Кэш на 1 минуту для быстрой отладки изменений
+            .setMinimumFetchIntervalInSeconds(60) // Локальный кэш на 1 минуту для разработки
             .build()
         remoteConfig.setConfigSettingsAsync(configSettings)
 
@@ -99,11 +104,22 @@ fun SettingsScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
                     apkDownloadUrl.value = remoteConfig.getString("apk_url")
                     showUpdateDialog.value = true
                 } else {
-                    Toast.makeText(context, "У вас установлена последняя версия", Toast.LENGTH_SHORT).show()
+                    if (!autoCheckForUpdates) {
+                        Toast.makeText(context, "У вас установлена последняя версия", Toast.LENGTH_SHORT).show()
+                    }
                 }
             } else {
-                Toast.makeText(context, "Не удалось проверить обновления", Toast.LENGTH_SHORT).show()
+                if (!autoCheckForUpdates) {
+                    Toast.makeText(context, "Не удалось проверить обновления", Toast.LENGTH_SHORT).show()
+                }
             }
+        }
+    }
+
+    // Триггер автоматической проверки обновлений при инициализации экрана настроек
+    LaunchedEffect(Unit) {
+        if (autoCheckForUpdates) {
+            checkForUpdates()
         }
     }
     // --- КОНЕЦ БЛОКА ОБНОВЛЕНИЙ ---

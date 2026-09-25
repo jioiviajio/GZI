@@ -25,31 +25,31 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 @Composable
-fun MainContainerScreen(onOpenSettings: () -> Unit) {
+fun MainContainerScreen(
+    onOpenSettings: () -> Unit,
+    onOpenLaboratory: () -> Unit // Прокидываем событие из навигации
+) {
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
 
     val fullHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
-    val minHeightPx = fullHeightPx / 2f // Исходное состояние — чат на 50% экрана
+    val minHeightPx = fullHeightPx / 2f
 
     val chatHeightAnim = remember { Animatable(minHeightPx) }
     var isScrollingActive by remember { mutableStateOf(false) }
 
-    // Конфигурация мягкой физической пружины без перелета (Bounce) границ
     val chatSpringSpec = remember {
         spring<Float>(
-            dampingRatio = Spring.DampingRatioLowBouncy, // Мягкий, едва заметный отскок в конце
-            stiffness = Spring.StiffnessMediumLow       // Комфортная скорость доводки
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
         )
     }
 
-    // Расчет прогресса и стейта на основе анимированного значения
     val currentHeightPx = chatHeightAnim.value
     val progress = ((currentHeightPx - minHeightPx) / (fullHeightPx - minHeightPx)).coerceIn(0f, 1f)
     val isExpanded = currentHeightPx > (fullHeightPx * 0.75f)
 
-    // Перехватываем жест "Назад" на телефоне, чтобы он сворачивал чат с новой анимацией
     BackHandler(enabled = isExpanded) {
         coroutineScope.launch {
             chatHeightAnim.animateTo(
@@ -61,13 +61,13 @@ fun MainContainerScreen(onOpenSettings: () -> Unit) {
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
 
-        // 1. НАШЕ ГЛАВНОЕ МЕНЮ
+        // Главное меню теперь знает, куда перенаправлять при клике на Лабораторию
         MainMenuScreen(
             progress = progress,
-            onOpenSettings = onOpenSettings
+            onOpenSettings = onOpenSettings,
+            onOpenLaboratory = onOpenLaboratory
         )
 
-        // 2. ВЫДВИЖНАЯ ШТОРКА ЧАТА С АВТОДОВОДЧИКОМ
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -84,30 +84,22 @@ fun MainContainerScreen(onOpenSettings: () -> Unit) {
                     onDragStopped = { velocity ->
                         coroutineScope.launch {
                             val midPoint = (minHeightPx + fullHeightPx) / 2f
-
-                            // Инвертируем скорость, так как свайп вверх дает отрицательный velocity,
-                            // но увеличивает высоту шторки в нашей логике координат.
                             val upwardVelocity = -velocity
-
-                            // Порог чувствительности к быстрому свайпу (флик)
                             val velocityThreshold = 1000f
 
                             if (upwardVelocity > velocityThreshold) {
-                                // Резкий жест вверх -> раскрываем на 100% с учетом начальной скорости
                                 chatHeightAnim.animateTo(
                                     targetValue = fullHeightPx,
                                     animationSpec = chatSpringSpec,
                                     initialVelocity = upwardVelocity
                                 )
                             } else if (upwardVelocity < -velocityThreshold) {
-                                // Резкий жест вниз -> сворачиваем до 50% с учетом скорости
                                 chatHeightAnim.animateTo(
                                     targetValue = minHeightPx,
                                     animationSpec = chatSpringSpec,
                                     initialVelocity = upwardVelocity
                                 )
                             } else {
-                                // Если жест был медленным (бросили шторку) -> доводим по средней точке
                                 if (chatHeightAnim.value > midPoint) {
                                     chatHeightAnim.animateTo(fullHeightPx, chatSpringSpec)
                                 } else {

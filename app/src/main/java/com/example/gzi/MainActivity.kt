@@ -1,6 +1,7 @@
 package com.example.gzi
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -22,17 +23,27 @@ import com.google.firebase.auth.auth
 import com.google.firebase.messaging.FirebaseMessaging
 
 class MainActivity : ComponentActivity() {
+
+    // Сейф-стейты для динамического управления экраном и триггером автопроверки апдейтов
+    private var currentDestinationState = mutableStateOf("main_container")
+    private var shouldAutoCheckUpdate = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Подписываем устройство сотрудника на канал системных обновлений ПСГиИ
         FirebaseMessaging.getInstance().subscribeToTopic("app_updates")
-
-        // ДОБАВЛЕНО: Подписываем устройство на серверный топик мгновенных сообщений чата
         FirebaseMessaging.getInstance().subscribeToTopic("chat_messages_topic")
 
-        // Проверяем, запущен ли экран через клик по пуш-уведомлению ("update" или "chat")
+        // Обработка холодного старта (приложение было полностью закрыто в памяти)
         val startDestination = intent.getStringExtra("navigate_to") ?: "main_container"
+        if (startDestination == "update") {
+            currentDestinationState.value = "settings"
+            shouldAutoCheckUpdate.value = true
+        } else if (startDestination == "chat") {
+            currentDestinationState.value = "chat"
+        } else {
+            currentDestinationState.value = "main_container"
+        }
 
         setContent {
             val sharedPreferences = remember { this.getSharedPreferences("GZI_PREFS", Context.MODE_PRIVATE) }
@@ -60,41 +71,53 @@ class MainActivity : ComponentActivity() {
                 try { Color(android.graphics.Color.parseColor(buttonColorStr)) } catch (e: Exception) { Color(0xFF1565C0) }
             }
 
-            // Применяем нашу обновленную глобальную тему с фиксацией шрифтов под ползунок
             GZITheme(darkTheme = isDarkMode, buttonColor = primaryColor, chatFontSize = appFontSize) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    AppNavigation(startDestination = startDestination)
+                    AppNavigation(
+                        currentScreen = currentDestinationState.value,
+                        autoCheckForUpdates = shouldAutoCheckUpdate.value,
+                        onScreenChanged = { currentDestinationState.value = it },
+                        onResetAutoCheck = { shouldAutoCheckUpdate.value = false }
+                    )
                 }
             }
         }
     }
-}
 
-// ЭТА ФУНКЦИЯ НАВИГАЦИИ СТОИТ ЗДЕСЬ — ПОСЛЕ ЗАКРЫВАЮЩЕЙ СКОБКИ КЛАССА
-@Composable
-fun AppNavigation(startDestination: String) {
-    var user by remember { mutableStateOf(Firebase.auth.currentUser) }
-    var currentScreen by remember {
-        mutableStateOf(
-            when (startDestination) {
-                "update" -> "settings"
-                "chat" -> "chat"
-                else -> "main_container"
-            }
-        )
+    // Обработка горячего старта (приложение было свернуто и пользователь кликнул по пушу)
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+
+        val screenToNavigate = intent.getStringExtra("navigate_to")
+        if (screenToNavigate == "update") {
+            currentDestinationState.value = "settings"
+            shouldAutoCheckUpdate.value = true // Взводим флаг автопроверки «на лету»
+        } else if (screenToNavigate == "chat") {
+            currentDestinationState.value = "chat"
+        }
     }
+}
+@Composable
+fun AppNavigation(
+    currentScreen: String,
+    autoCheckForUpdates: Boolean,
+    onScreenChanged: (String) -> Unit,
+    onResetAutoCheck: () -> Unit
+) {
+    var user by remember { mutableStateOf(Firebase.auth.currentUser) }
     var isNameRequired by remember { mutableStateOf(user != null && user?.displayName.isNullOrBlank()) }
 
-    // ИСПРАВЛЕНО: Если открыт экран Настроек, жест "Назад" возвращает в меню вместо закрытия приложения
-    BackHandler(enabled = currentScreen == "settings") {
-        currentScreen = "main_container"
+    // Аппаратная кнопка "Назад" перехватывает управление на второстепенных экранах системы
+    BackHandler(enabled = currentScreen == "settings" || currentScreen == "laboratory") {
+        onScreenChanged("main_container")
     }
 
     LaunchedEffect(Unit) {
         Firebase.auth.addAuthStateListener { auth ->
             user = auth.currentUser
             isNameRequired = auth.currentUser != null && auth.currentUser?.displayName.isNullOrBlank()
-            if (auth.currentUser == null) currentScreen = "main_container"
+            if (auth.currentUser == null) onScreenChanged("main_container")
         }
     }
 
@@ -103,20 +126,33 @@ fun AppNavigation(startDestination: String) {
     } else if (isNameRequired) {
         NameSetupScreen(onNameSaved = {
             isNameRequired = false
-            currentScreen = "main_container"
+            onScreenChanged("main_container")
         })
     } else {
         when (currentScreen) {
-            "main_container" -> MainContainerScreen(onOpenSettings = { currentScreen = "settings" })
+            "main_container" -> MainContainerScreen(
+                onOpenSettings = { onScreenChanged("settings") },
+                onOpenLaboratory = { onScreenChanged("laboratory") } // Передаем событие открытия лаборатории
+            )
             "settings" -> SettingsScreen(
-                onBack = { currentScreen = "main_container" },
-                onSignOut = { Firebase.auth.signOut() }
+                autoCheckForUpdates = autoCheckForUpdates,
+                onBack = {
+                    onResetAutoCheck() // Сбрасываем триггер при выходе из настроек
+                    onScreenChanged("main_container")
+                },
+                onSignOut = {
+                    onResetAutoCheck()
+                    Firebase.auth.signOut()
+                }
             )
             "chat" -> ChatScreen(
                 progress = 0f,
                 isExpanded = true,
-                onBackToMenu = { currentScreen = "main_container" },
+                onBackToMenu = { onScreenChanged("main_container") },
                 onScrollStateChanged = { _ -> }
+            )
+            "laboratory" -> LaboratoryScreen(
+                onBack = { onScreenChanged("main_container") }
             )
         }
     }
