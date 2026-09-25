@@ -25,7 +25,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Подписываем устройство сотрудника на канал системных обновлений ПСГиИ
         FirebaseMessaging.getInstance().subscribeToTopic("app_updates")
+
+        // ДОБАВЛЕНО: Подписываем устройство на серверный топик мгновенных сообщений чата
+        FirebaseMessaging.getInstance().subscribeToTopic("chat_messages_topic")
+
+        // Проверяем, запущен ли экран через клик по пуш-уведомлению ("update" или "chat")
         val startDestination = intent.getStringExtra("navigate_to") ?: "main_container"
 
         setContent {
@@ -33,7 +39,6 @@ class MainActivity : ComponentActivity() {
 
             var isDarkMode by remember { mutableStateOf(sharedPreferences.getBoolean("is_dark_mode", false)) }
             var buttonColorStr by remember { mutableStateOf(sharedPreferences.getString("color_buttons", "#1565C0") ?: "#1565C0") }
-            // ДОБАВЛЕНО: Глобальный стейт размера шрифта приложения
             var appFontSize by remember { mutableStateOf(sharedPreferences.getFloat("chat_font_size", 16f)) }
 
             val listener = remember {
@@ -41,7 +46,7 @@ class MainActivity : ComponentActivity() {
                     when (key) {
                         "is_dark_mode" -> isDarkMode = sharedPreferences.getBoolean("is_dark_mode", false)
                         "color_buttons" -> buttonColorStr = sharedPreferences.getString("color_buttons", "#1565C0") ?: "#1565C0"
-                        "chat_font_size" -> appFontSize = sharedPreferences.getFloat("chat_font_size", 16f) // ОБНОВЛЯЕМ ШРИФТ НА ЛЕТУ
+                        "chat_font_size" -> appFontSize = sharedPreferences.getFloat("chat_font_size", 16f)
                     }
                 }
             }
@@ -55,7 +60,7 @@ class MainActivity : ComponentActivity() {
                 try { Color(android.graphics.Color.parseColor(buttonColorStr)) } catch (e: Exception) { Color(0xFF1565C0) }
             }
 
-            // ПРИМЕНЯЕМ НАШУ ОБНОВЛЕННУЮ ТЕМУ
+            // Применяем нашу обновленную глобальную тему с фиксацией шрифтов под ползунок
             GZITheme(darkTheme = isDarkMode, buttonColor = primaryColor, chatFontSize = appFontSize) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     AppNavigation(startDestination = startDestination)
@@ -65,6 +70,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// ЭТА ФУНКЦИЯ НАВИГАЦИИ СТОИТ ЗДЕСЬ — ПОСЛЕ ЗАКРЫВАЮЩЕЙ СКОБКИ КЛАССА
 @Composable
 fun AppNavigation(startDestination: String) {
     var user by remember { mutableStateOf(Firebase.auth.currentUser) }
@@ -79,6 +85,7 @@ fun AppNavigation(startDestination: String) {
     }
     var isNameRequired by remember { mutableStateOf(user != null && user?.displayName.isNullOrBlank()) }
 
+    // ИСПРАВЛЕНО: Если открыт экран Настроек, жест "Назад" возвращает в меню вместо закрытия приложения
     BackHandler(enabled = currentScreen == "settings") {
         currentScreen = "main_container"
     }

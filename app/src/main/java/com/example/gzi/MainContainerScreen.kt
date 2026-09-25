@@ -2,6 +2,8 @@ package com.example.gzi
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -34,15 +36,26 @@ fun MainContainerScreen(onOpenSettings: () -> Unit) {
     val chatHeightAnim = remember { Animatable(minHeightPx) }
     var isScrollingActive by remember { mutableStateOf(false) }
 
+    // Конфигурация мягкой физической пружины без перелета (Bounce) границ
+    val chatSpringSpec = remember {
+        spring<Float>(
+            dampingRatio = Spring.DampingRatioLowBouncy, // Мягкий, едва заметный отскок в конце
+            stiffness = Spring.StiffnessMediumLow       // Комфортная скорость доводки
+        )
+    }
+
     // Расчет прогресса и стейта на основе анимированного значения
     val currentHeightPx = chatHeightAnim.value
     val progress = ((currentHeightPx - minHeightPx) / (fullHeightPx - minHeightPx)).coerceIn(0f, 1f)
     val isExpanded = currentHeightPx > (fullHeightPx * 0.75f)
 
-    // ИСПРАВЛЕНО: Перехватываем жест "Назад" на телефоне, чтобы он сворачивал чат, а не закрывал приложение
+    // Перехватываем жест "Назад" на телефоне, чтобы он сворачивал чат с новой анимацией
     BackHandler(enabled = isExpanded) {
         coroutineScope.launch {
-            chatHeightAnim.animateTo(minHeightPx)
+            chatHeightAnim.animateTo(
+                targetValue = minHeightPx,
+                animationSpec = chatSpringSpec
+            )
         }
     }
 
@@ -64,8 +77,7 @@ fun MainContainerScreen(onOpenSettings: () -> Unit) {
                     enabled = !isScrollingActive,
                     state = rememberDraggableState { delta ->
                         coroutineScope.launch {
-                            val target =
-                                (chatHeightAnim.value - delta).coerceIn(minHeightPx, fullHeightPx)
+                            val target = (chatHeightAnim.value - delta).coerceIn(minHeightPx, fullHeightPx)
                             chatHeightAnim.snapTo(target)
                         }
                     },
@@ -73,12 +85,34 @@ fun MainContainerScreen(onOpenSettings: () -> Unit) {
                         coroutineScope.launch {
                             val midPoint = (minHeightPx + fullHeightPx) / 2f
 
-                            // Если толкнули вверх с силой ИЛИ просто бросили в верхней половине — раскрываем на 100%
-                            if (velocity < -500f || chatHeightAnim.value > midPoint) {
-                                chatHeightAnim.animateTo(fullHeightPx)
+                            // Инвертируем скорость, так как свайп вверх дает отрицательный velocity,
+                            // но увеличивает высоту шторки в нашей логике координат.
+                            val upwardVelocity = -velocity
+
+                            // Порог чувствительности к быстрому свайпу (флик)
+                            val velocityThreshold = 1000f
+
+                            if (upwardVelocity > velocityThreshold) {
+                                // Резкий жест вверх -> раскрываем на 100% с учетом начальной скорости
+                                chatHeightAnim.animateTo(
+                                    targetValue = fullHeightPx,
+                                    animationSpec = chatSpringSpec,
+                                    initialVelocity = upwardVelocity
+                                )
+                            } else if (upwardVelocity < -velocityThreshold) {
+                                // Резкий жест вниз -> сворачиваем до 50% с учетом скорости
+                                chatHeightAnim.animateTo(
+                                    targetValue = minHeightPx,
+                                    animationSpec = chatSpringSpec,
+                                    initialVelocity = upwardVelocity
+                                )
                             } else {
-                                // Иначе плавно возвращаем на исходные 50%
-                                chatHeightAnim.animateTo(minHeightPx)
+                                // Если жест был медленным (бросили шторку) -> доводим по средней точке
+                                if (chatHeightAnim.value > midPoint) {
+                                    chatHeightAnim.animateTo(fullHeightPx, chatSpringSpec)
+                                } else {
+                                    chatHeightAnim.animateTo(minHeightPx, chatSpringSpec)
+                                }
                             }
                         }
                     }
@@ -89,11 +123,8 @@ fun MainContainerScreen(onOpenSettings: () -> Unit) {
                 isExpanded = isExpanded,
                 onBackToMenu = {
                     coroutineScope.launch {
-                        if (isExpanded) {
-                            chatHeightAnim.animateTo(minHeightPx)
-                        } else {
-                            chatHeightAnim.animateTo(fullHeightPx)
-                        }
+                        val target = if (isExpanded) minHeightPx else fullHeightPx
+                        chatHeightAnim.animateTo(target, chatSpringSpec)
                     }
                 },
                 onScrollStateChanged = { active -> isScrollingActive = active }
